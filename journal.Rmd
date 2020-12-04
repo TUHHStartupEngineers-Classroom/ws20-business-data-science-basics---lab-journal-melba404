@@ -69,7 +69,6 @@ sales_by_location_tbl <- bike_orderlines_wrangled_tbl %>%
                                      decimal.mark = ",",
                                      prefix = "",
                                      suffix = " €"))
-sales_by_location_tbl
 
 # Step 2 - Visualize
 sales_by_location_tbl %>%
@@ -128,4 +127,53 @@ sales_by_location_year_tbl %>%
     subtitle = "Most states have an upward trend"
     #fill = "Year" # Changes the legend name
   )
+```
+# Data Acquisition
+## Challenge
+```{r}
+#1. API
+library(tidyverse)
+library(httr)
+library(jsonlite)
+library(tibble)
+library(keyring)
+
+keyring::key_set("token")
+
+resp <- GET("https://www.ncdc.noaa.gov/cdo-web/api/v2/stations?limit=1000",
+            add_headers(token = key_get("token")))
+
+stations_tbl <- resp %>% 
+  .$content  %>% 
+  rawToChar() %>% 
+  fromJSON() %>% .$results
+
+stations_10_tbl <- stations_tbl %>%
+  head(10)
+stations_10_tbl
+
+#2. Web scraping
+library(rvest)
+url  <- "https://www.rosebikes.de/fahrr%C3%A4der/rennrad"
+html <- url %>% 
+  read_html()
+
+model_names <- html %>% 
+  html_nodes(".catalog-category-bikes__title > span") %>% 
+  html_text() %>%
+  stringr::str_extract("(?<=\n).*(?=\n)")
+
+model_prices_cent <- html %>%
+  html_nodes(".catalog-category-bikes__price-title") %>%
+  html_text() %>%
+  stringr::str_extract("(?<=ab\\s).*(?=\\s€)") %>%
+  str_replace_all( c("\\."="" ,","="")) %>%
+  as.numeric()
+# in this case could have removed ",00" since all prices are in even Euros, but
+# chose a more general approach which works for prices like 1.399,99 EUR too
+
+model_prices_EUR = model_prices_cent/100 # convert price in cent to price in EUR
+
+bikes_tbl <- tibble(model_names, model_prices_EUR) %>%
+  head(10)
 ```
