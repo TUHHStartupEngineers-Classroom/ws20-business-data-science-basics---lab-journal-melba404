@@ -24,3 +24,108 @@ knitr::opts_chunk$set(
 
 ## Challenge
 
+```{r}
+# Data Science at TUHH ------------------------------------------------------
+# Challenge01 ----
+
+# 1.0 Load libraries ----
+library(tidyverse)
+library(readxl)
+
+# 2.0 Importing Files ----
+bikes_tbl      <- read_excel("docs/00_data/01_bike_sales/01_raw_data/bikes.xlsx")
+orderlines_tbl <- read_excel("docs/00_data/01_bike_sales/01_raw_data/orderlines.xlsx")
+bikeshops_tbl  <- read_excel("docs/00_data/01_bike_sales/01_raw_data/bikeshops.xlsx")
+
+# 3.0 Joining Data ----
+bike_orderlines_joined_tbl <- orderlines_tbl %>%
+  left_join(bikes_tbl,     by = c("product.id"  = "bike.id")) %>%
+  left_join(bikeshops_tbl, by = c("customer.id" = "bikeshop.id"))
+
+# 4.0 Wrangling Data ----
+bike_orderlines_wrangled_tbl <- bike_orderlines_joined_tbl %>%
+  select(-...1) %>%
+  rename(bikeshop = name) %>%
+  set_names(names(.) %>% str_replace_all("\\.", "_")) %>%
+  
+  separate(col = "location",
+           into = c("city", "state"),
+           sep = ", ") %>%
+  
+  mutate(total_price = price * quantity)
+
+# 5.0 Business Insights ----
+# 5.1 Sales by Location ----
+
+# Step 1 - Manipulate
+sales_by_location_tbl <- bike_orderlines_wrangled_tbl %>%
+  
+  select(state, total_price) %>%
+  
+  group_by(state) %>%
+  summarize(sales = sum(total_price)) %>%
+  
+  mutate(sales_text = scales::dollar(sales, big.mark = ".",
+                                     decimal.mark = ",",
+                                     prefix = "",
+                                     suffix = " €"))
+sales_by_location_tbl
+
+# Step 2 - Visualize
+sales_by_location_tbl %>%
+  
+  ggplot(aes(x = state, y = sales)) +
+  
+  geom_col(fill = "#2DC6D6") + 
+  geom_label(aes(label = sales_text)) +
+  
+  scale_y_continuous(labels = scales::dollar_format(big.mark = ".", 
+                                                    decimal.mark = ",", 
+                                                    prefix = "", 
+                                                    suffix = " €")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  
+  labs(
+    title = "Revenue by State",
+    x = "",
+    y = "Revenue"
+  )
+
+# 5.2 Sales by Location and Year ----
+library(lubridate)
+# Step 1 - Manipulate
+sales_by_location_year_tbl <- bike_orderlines_wrangled_tbl %>%
+  
+  select(state, total_price, order_date) %>%
+  mutate(year = year(order_date)) %>%
+  
+  group_by(state, year) %>%
+  summarise(sales = sum(total_price)) %>%
+  ungroup() %>%
+  
+  mutate(sales_text = scales::dollar(sales, big.mark = ".", 
+                                     decimal.mark = ",", 
+                                     prefix = "", 
+                                     suffix = " €"))
+
+# Step 2 - Visualize
+sales_by_location_year_tbl %>%
+  
+  ggplot(aes(x = year, y = sales)) +
+  
+  geom_col() +
+  geom_smooth(method = "lm", se = FALSE) +
+  
+  facet_wrap(~ state) +
+  
+  scale_y_continuous(labels = scales::dollar_format(big.mark = ".", 
+                                                    decimal.mark = ",", 
+                                                    prefix = "", 
+                                                    suffix = " €")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "Revenue by state and year",
+    subtitle = "Most states have an upward trend"
+    #fill = "Year" # Changes the legend name
+  )
+```
