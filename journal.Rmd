@@ -82,6 +82,7 @@ sales_by_location_tbl %>%
                                                     decimal.mark = ",", 
                                                     prefix = "", 
                                                     suffix = " €")) +
+  
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   
   labs(
@@ -121,15 +122,17 @@ sales_by_location_year_tbl %>%
                                                     decimal.mark = ",", 
                                                     prefix = "", 
                                                     suffix = " €")) +
+  
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   labs(
-    title = "Revenue by state and year",
+    title    = "Revenue by state and year",
     subtitle = "Most states have an upward trend"
-    #fill = "Year" # Changes the legend name
   )
 ```
+
 # Data Acquisition
 ## Challenge
+
 ```{r}
 #1. API
 library(tidyverse)
@@ -144,7 +147,7 @@ resp <- GET("https://www.ncdc.noaa.gov/cdo-web/api/v2/stations?limit=1000",
             add_headers(token = key_get("token")))
 
 stations_tbl <- resp %>% 
-  .$content  %>% 
+  .$content %>% 
   rawToChar() %>% 
   fromJSON() %>% .$results
 
@@ -155,8 +158,7 @@ stations_10_tbl
 #2. Web scraping
 library(rvest)
 url  <- "https://www.rosebikes.de/fahrr%C3%A4der/rennrad"
-html <- url %>% 
-  read_html()
+html <- url %>% read_html()
 
 model_names <- html %>% 
   html_nodes(".catalog-category-bikes__title > span") %>% 
@@ -176,4 +178,292 @@ model_prices_EUR = model_prices_cent/100 # convert price in cent to price in EUR
 
 bikes_tbl <- tibble(model_names, model_prices_EUR) %>%
   head(10)
+bikes_tbl
+```
+
+# Data wrangling
+## Challenge
+
+```{r, eval = FALSE}
+# Data wrangling - challenge ----
+library(vroom)
+library(data.table)
+library(tidyverse)
+
+# Loading and merging assignee and patent assignee ----
+# specifying col_types for assignee, skipping names since only looking at orgs
+col_types <- list(
+  id           = col_character(),
+  type         = col_integer() ,
+  name_first   = col_skip(),
+  name_last    = col_skip(),
+  organization = col_character()
+)
+
+assignee_tbl <- vroom(
+  file       = "docs/02_data_wrangling/assignee.tsv", 
+  delim      = "\t", 
+  col_types  = col_types,
+  na         = c("", "NA", "NULL")
+)
+setDT(assignee_tbl)
+
+# specifying col_types for patent_assignee, can skip location_id since info is provided by 'type' column of assignee
+col_types <- list(
+  patent_id   = col_character(),
+  assignee_id = col_character(),
+  location_id = col_skip()
+)
+
+patent_assignee_tbl <- vroom(
+  file       = "docs/02_data_wrangling/patent_assignee.tsv", 
+  delim      = "\t", 
+  col_types  = col_types,
+  na         = c("", "NA", "NULL")
+)
+setDT(patent_assignee_tbl)
+
+# merge data: all.x and all.y FALSE so only IDs are kept, that have an organization, and at least one patent
+combined_data_t1 <- merge(x = patent_assignee_tbl, y = assignee_tbl,
+                          by.x  = "assignee_id",
+                          by.y  = "id",
+                          all.x = FALSE,
+                          all.y = FALSE)
+
+# Finding orgs with most patents ----
+# type 2 means US org, .N counts # of occurences, group by org, then put them in descending order
+top_10_us <- head(combined_data_t1[type == 2, .N, by = organization][order(-N)], 10)
+top_10_us
+
+# Most patents 2019 ----
+library(lubridate)
+
+# import patent data
+col_types <- list(
+  id         = col_character(),
+  type       = col_skip(),
+  number     = col_skip(),
+  country    = col_skip(),
+  date       = col_date("%Y-%m-%d"),
+  abstract   = col_skip(),
+  title      = col_skip(),
+  kind       = col_skip(),
+  num_claims = col_skip(),
+  filename   = col_skip(),
+  withdrawn  = col_skip()
+)
+
+patent_tbl <- vroom(
+  file      = "docs/02_data_wrangling/patent.tsv", 
+  delim     = "\t", 
+  col_types = col_types,
+  na        = c("", "NA", "NULL")
+)
+setDT(patent_tbl)
+
+# merge info about patents of orgs with infos about dates of patents
+
+combined_data_t2 <- merge(x = combined_data_t1, y = patent_tbl,
+                          by.x  = "patent_id",
+                          by.y  = "id",
+                          all.x = FALSE,
+                          all.y = FALSE)
+most_patents_2019 <- head(combined_data_t2[lubridate::year(date)=="2019" & type == 2, .N, by = organization][order(-N)], 10)
+most_patents_2019
+
+# Most innovative tech sector ----
+
+# load uspc data
+col_types <- list(
+  uuid         = col_skip(),
+  patent_id    = col_character(),
+  mainclass_id = col_character(),
+  subclass_id  = col_skip(),
+  sequence     = col_skip()
+)
+
+uspc_tbl <- vroom(
+  file      = "docs/02_data_wrangling/uspc.tsv", 
+  delim     = "\t", 
+  col_types = col_types,
+  na        = c("", "NA", "NULL")
+)
+setDT(uspc_tbl)
+
+
+combined_data_t3 <- merge(x = combined_data_t1, y = uspc_tbl,
+                          by    = "patent_id",
+                          all.x = FALSE,
+                          all.y = FALSE)
+
+# only want to count patents once per mainclass
+most_inno_tech <- combined_data_t3[, unique(patent_id), by=mainclass_id][, .N , by =mainclass_id][order(-N)]
+
+head(most_inno_tech$mainclass_id,1)
+
+rm(top_ten_ww)
+
+top10_ww <- combined_data_t1[type == 2 | type == 3, .N , by = organization][order(-N)][1:10]
+
+most_inno_tech_top10 <- combined_data_t3[organization %in% top10_ww$organization,
+                                         unique(patent_id),
+                                         by=mainclass_id][, .N, by =mainclass_id][order(-N)]
+head(most_inno_tech_top10$mainclass_id, 5)
+
+```
+
+```{r}
+read_rds("docs/top_ten_US")
+read_rds("docs/patents_granted")
+read_rds("docs/most_inno_tech")
+read_rds("docs/most_inno_main_class")
+```
+
+# Data visualization
+## Challenge 1 - COVID-19 cases in select countries
+
+```{r}
+# Data visualization - challenge 1 ----
+
+# Libraries
+library(tidyverse)
+library(lubridate)
+
+# Import most recent data
+covid_data_tbl <- read_csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv")
+
+# GOAL: plot of cumulative cases for Germany, UK, France, Spain, USA
+
+# Data wrangling ----
+cum_c19_cases_tbl <- covid_data_tbl %>%
+  mutate(date := lubridate::dmy(dateRep)) %>%
+  select(date, countriesAndTerritories, cases) %>%
+  filter(countriesAndTerritories %in% c("Germany",
+                                        "United_Kingdom",
+                                        "France",
+                                        "Spain",
+                                        "United_States_of_America"),
+         year(date) == "2020") %>%
+  
+  group_by(countriesAndTerritories) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(cum_cases = cumsum(cases)) %>%
+  ungroup()
+
+# Data visualization ----
+library(ggrepel)
+
+cum_c19_cases_tbl %>% 
+  ggplot(aes(date, cum_cases, color = countriesAndTerritories)) +
+  
+  geom_line(size = 1) +
+  
+  geom_label_repel(
+    label = scales::dollar(max(cum_c19_cases_tbl$cum_cases),
+                           big.mark     = ".",
+                           decimal.mark = ",",
+                           prefix       = ""),
+    data = cum_c19_cases_tbl %>%
+      filter(date %in% max(date),
+             countriesAndTerritories == "United_States_of_America"),
+    segment.size       = 0.5,
+    min.segment.length = 0,
+    box.padding        = 3) +
+  
+  scale_y_continuous(labels = scales::dollar_format(scale = 1e-6,
+                                                    prefix = "",
+                                                    suffix = " M")) +
+  scale_x_date(date_labels = "%B", date_breaks = "1 month") +
+  
+  labs(
+    title = "COVID-19 confirmed cases worldwide",
+    subtitle = str_glue("As of {Sys.Date()}, the USA had a lot more cases than all european countries"),
+    x = "Year 2020",
+    y = "Cumulative cases",
+    color = "Countries" # set legend title
+  ) +
+  
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.direction = "vertical",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+## Challenge 2 - mortality rate in % by country
+
+```{r}
+# Data visualization: challenge 2 ----
+
+library(tidyverse)
+library(lubridate)
+library(maps)
+library(ggthemes)
+
+# import data
+covid_data_tbl <- read_csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv") 
+world <- map_data("world")
+
+# Data wrangling ----
+covid_deaths_tbl <- covid_data_tbl %>%
+  mutate(date := lubridate::dmy(dateRep)) %>%
+  select(date, countriesAndTerritories, deaths, popData2019) %>%
+  filter(year(date) == "2020") %>%
+  
+  group_by(countriesAndTerritories) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(total_deaths = cumsum(deaths)) %>%
+  ungroup() %>%
+  
+  filter(date == as.Date(date("2020-12-01"))) %>%
+  
+  mutate(mortality_pct = 100 * total_deaths / popData2019) %>%
+  
+  select(date, countriesAndTerritories, mortality_pct) %>%
+  
+  mutate(across(countriesAndTerritories, str_replace_all, "_", " ")) %>%
+  mutate(countriesAndTerritories = case_when(
+    
+    countriesAndTerritories == "United Kingdom" ~ "UK",
+    countriesAndTerritories == "United States of America" ~ "USA",
+    countriesAndTerritories == "Czechia" ~ "Czech Republic",
+    TRUE ~ countriesAndTerritories
+    
+  ))
+
+# full join to display countries without data on map
+covid_mortality_tbl <- covid_deaths_tbl %>%
+  full_join(world %>% select(region, long, lat),
+            by = c("countriesAndTerritories" = "region"))
+
+# Data visualization ----
+covid_mortality_tbl %>% ggplot()+
+  
+  geom_map(map = world,
+           aes(long, lat, map_id = countriesAndTerritories),
+           color="#2b2b2b", fill=NA, size=0.15) +
+  
+  geom_map(map = world,
+           aes(fill=mortality_pct,
+               map_id = countriesAndTerritories),
+           color="white", size=0.15) +
+  scale_fill_continuous(name="Mortality Rate",
+                        type = "viridis") +
+  
+  labs(
+    title = "Confirmed COVID-19 deaths relative to the size of the population",
+    # subtitle = str_glue("{max "),
+    x = "Year 2020",
+    y = "Cumulative cases",
+    color = "Countries"
+  ) +
+  
+  theme_map() +
+  theme(
+    plot.margin=margin(20, 20, 20, 20),
+    legend.position = c(0.1, 0.3)
+    )
+
 ```
